@@ -1,4 +1,5 @@
 Rails.application.routes.draw do
+  resources :products
   namespace :admin do
     resources :users
     root to: "users#index"
