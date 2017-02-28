@@ -35,7 +35,10 @@ class CompaniesScraper
   end
 
   def scrape
+    cnt = 0
     CSV.foreach(@source, headers: true) do |row|
+      cnt += 1
+      next if cnt <= 3
       html = @request_handler.page_info(row['URL'])
       @co_parser.parse(html, row['URL'], row['Anchor']) if html
     end
@@ -48,6 +51,7 @@ class CompaniesScraper
 #    (a profile picture from facebook page or instagram page that corresponds to the website) ----> b.profile_image (this is an url string)
 end
 
+# Handles the parsing of all data both static and AJAX-loaded data
 class CompaniesParser
   META_DESCRIPTION = "meta[name='description']".freeze
   META_TITLE = "meta[property='og:title']".freeze
@@ -65,13 +69,13 @@ class CompaniesParser
       title:       '',
       image:       ''
     }
-    set_meta_info
+    set_static_meta_info
     @social_links = {
       facebook:    '',
       instagram:   ''
     }
     @profile_picture = ''
-    set_social_links
+    set_static_social_links
     ensure_data_with_js
     # create model
   end
@@ -90,76 +94,94 @@ class CompaniesParser
     end
   end
 
+  # Creates a CSS selector based on a company name. Handles names of multiple
+  # words and/ore that have special characters:
+  #
+  # Ex:
+  #
+  # The Bouqs => ["[href*='the']", "href*='bouqs'"]
+  # Frank & Oak => ["href*='frank'", "href*='oak'"]
+  # 
   def css_name_selector
     @name.reduce('') do |sum, n|
-      sum + "[href*='#{n}']"
+      sum + "[href*='#{n.downcase}']"
     end
   end
 
-  def set_meta_info
+  def set_static_meta_info
     @meta_info.each do |k, _|
       data = @html.css(self.class.const_get("META_#{k.to_s.upcase}"))[0]
       @meta_info[k] = data['content'] if data
     end
-    p @meta_info
   end
 
-  def set_social_links
+  def set_static_social_links
     @social_links.each do |k, _|
       data = @html.css(self.class.const_get("#{k.to_s.upcase}_SELECTOR") + css_name_selector)[0]
       @social_links[k] = data['href'] if data
-      p @social_links
     end
   end
 
-  def ensure_data_with_js
-    # check with js/selenium
-    driver = Selenium::WebDriver.for :chrome, switches: %w[--ignore-certificate-errors --disable-translate], driver_path: '/home/durendal/workspace/chromedriver'
-
-    driver.navigate.to @url
-
+  def check_js_loaded_meta_info
     @meta_info.each do |k,v|
       next unless v.empty?
       begin
-        el = driver.find_element(:css, self.class.const_get("META_#{k.to_s.upcase}"))
+        el = @driver.find_element(:css, self.class.const_get("META_#{k.to_s.upcase}"))
         @meta_info[k] = el['content']
       rescue Selenium::WebDriver::Error::NoSuchElementError
         puts "No #{k} element found"
       end
     end
-    p @meta_info 
+  end
 
+  def check_js_loaded_social_links
     if @social_links.values.keep_if { |s| !s.empty? }.empty?
       @social_links.each do |k,_|
         begin
-          el = driver.find_element(:css, self.class.const_get("#{k.to_s.upcase}_SELECTOR") + css_name_selector) # Need to account for multiple word names, need to also get rid of special characters
+          el = @driver.find_element(:css, self.class.const_get("#{k.to_s.upcase}_SELECTOR") + css_name_selector)
           @social_links[k] = el['href']
         rescue Selenium::WebDriver::Error::NoSuchElementError
           puts "No #{k} element found"
         end
       end
     end
+  end
 
-    # Grab social media picture
+  def check_js_loaded_profile_pic
     @social_links.each do |k, v|
       break unless @profile_picture.empty?
       next if v.empty?
-      driver.navigate.to v
+      @driver.navigate.to v
       begin
         if k == :facebook
-          el = driver.find_element(:css, "a[aria-label='Profile picture'] img")
+          el = @driver.find_element(:css, "a[aria-label='Profile picture'] img")
         else
           binding.pry
-          el = driver.find_element(:css, "header img[class='_8gpiy _r43r5']")
+          el = @driver.find_element(:css, "header img[class='_8gpiy _r43r5']")
         end
       rescue Selenium::WebDriver::Error::NoSuchElementError
         puts "No #{k} element found fo social link"
       end
       @profile_picture = el['src'] if el
-      p @profile_picture
     end
+  end
 
-    driver.quit
+  def ensure_data_with_js
+    # check with js/selenium
+    @driver = Selenium::WebDriver.for :chrome, switches: %w[--ignore-certificate-errors --disable-translate], driver_path: '/home/durendal/workspace/chromedriver'
+
+    @driver.navigate.to @url
+
+    check_js_loaded_meta_info
+    p @meta_info 
+
+    check_js_loaded_social_links
+    p @social_links
+
+    check_js_loaded_profile_pic
+    p @profile_picture
+
+    @driver.quit
   end
 end
 
