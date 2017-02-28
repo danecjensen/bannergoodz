@@ -16,8 +16,7 @@ class CompaniesScraper
   def scrape
     CSV.foreach(@source, headers: true) do |row|
       html = @request_handler.page_info(row['URL'])
-      name = row['Domain'].match(/(.*)\./)[1]
-      @co_parser.parse(html, name) if html
+      @co_parser.parse(html, row['URL']) if html
     end
   end
 
@@ -35,9 +34,10 @@ class CompaniesParser
   FACEBOOK_SELECTOR = 'a[href^="https://www.facebook"]'.freeze
   INSTAGRAM_SELECTOR = 'a[href^="https://www.instagram"]'.freeze
 
-  def parse(html, name)
+  def parse(html, url)
     @html = html
-    @name = name
+    @url = url
+    @name = url.match(/http[s]?:\/\/[w]{0,3}\.?(.*)\./)[1]
     @meta_info = {
       description: '',
       title:       '',
@@ -48,6 +48,7 @@ class CompaniesParser
       facebook:    '',
       instagram:   ''
     }
+    @profile_picture = ''
     set_social_links
     ensure_data_with_js
     # create model
@@ -72,6 +73,51 @@ class CompaniesParser
   end
 
   def ensure_data_with_js
+    # check with js/selenium
+    driver = Selenium::WebDriver.for :chrome, switches: %w[--ignore-certificate-errors --disable-translate], driver_path: '/home/durendal/workspace/chromedriver'
+
+    driver.navigate.to @url
+
+    @meta_info.each do |k,v|
+      next unless v.empty?
+      begin
+        el = driver.find_element(:css, self.class.const_get("META_#{k.to_s.upcase}"))
+        @meta_info[k] = el['content']
+      rescue Selenium::WebDriver::Error::NoSuchElementError
+        puts "No #{k} element found"
+      end
+    end
+    p @meta_info 
+
+    if @social_links.values.keep_if { |s| !s.empty? }.empty?
+      @social_links.each do |k,_|
+        begin
+          el = driver.find_element(:css, self.class.const_get("#{k.to_s.upcase}_SELECTOR") + "[href*='#{@name}']") # Need to account for multiple word names, need to also get rid of special characters
+          @social_links[k] = el['href']
+        rescue Selenium::WebDriver::Error::NoSuchElementError
+          puts "No #{k} element found"
+        end
+      end
+    end
+
+    # Grab social media picture
+    @social_links.each do |k, v|
+      break unless @profile_picture.empty?
+      next if v.empty?
+      driver.navigate.to v
+      begin
+        if k == :facebook
+          el = driver.find_element(:css, "a[aria-label='Profile picture'] img")
+        else
+          binding.pry
+          el = driver.find_element(:css, "header img[class='_8gpiy _r43r5']")
+        end
+      rescue Selenium::WebDriver::Error::NoSuchElementError
+        puts "No #{k} element found fo social link"
+      end
+      @profile_picture = el['src'] if el
+      p @profile_picture
+    end
   end
 end
 
