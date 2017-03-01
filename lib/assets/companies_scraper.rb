@@ -55,20 +55,10 @@ class CompaniesParser
     @html = html
     @url = url
     @name = cleanse_name(name)
-    @meta_info = {
-      description: '',
-      title:       '',
-      image:       ''
-    }
+    reset_vars
     set_static_meta_info
-    @social_links = {
-      facebook:    '',
-      instagram:   ''
-    }
-    @profile_picture = ''
     set_static_social_links
     ensure_data_with_js
-    # create model
     Brand.create({
       desc: @meta_info[:description],
       name: @meta_info[:title],
@@ -88,6 +78,12 @@ class CompaniesParser
   end
 
   private
+
+  def reset_vars
+    @meta_info = { description: '', title: '', image: '' }
+    @social_links = { facebook: '', instagram: '' }
+    @profile_picture = ''
+  end
 
   def cleanse_name(name)
     name_arr = name_as_arr(name)
