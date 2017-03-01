@@ -35,10 +35,12 @@ class CompaniesScraper
   end
 
   def scrape
+    @co_parser.start_driver
     CSV.foreach(@source, headers: true) do |row|
       html = @request_handler.page_info(row['URL'])
       @co_parser.parse(html, row['URL'], row['Anchor']) if html
     end
+    @co_parser.stop_driver
   end
 
 #    pecifically (where b = Brand.new):
@@ -73,10 +75,16 @@ class CompaniesParser
     }
     @profile_picture = ''
     set_static_social_links
-    @driver = Selenium::WebDriver.for :chrome, switches: %w[--ignore-certificate-errors --disable-translate], driver_path: '/home/durendal/workspace/chromedriver'
     ensure_data_with_js
-    @driver.quit
     # create model
+  end
+
+  def start_driver
+    @driver = Selenium::WebDriver.for :chrome, switches: %w[--ignore-certificate-errors --disable-translate], driver_path: '/home/durendal/workspace/chromedriver'
+  end
+
+  def stop_driver
+    @driver.quit
   end
 
   private
@@ -222,7 +230,6 @@ class CompaniesParser
   end
 
   def ensure_data_with_js
-    # check with js/selenium
     @driver.manage.timeouts.page_load = 60
 
     selenium_search_wrapper do
