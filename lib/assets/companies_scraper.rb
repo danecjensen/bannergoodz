@@ -128,6 +128,8 @@ class CompaniesParser
   # The Bouqs => "[href*='the'][href*='bouqs']"
   # Frank & Oak => "[href*='frank'][href*='oak']"
   # 
+  # Possible TODO: Make more robust to where you don't have to rely on Co. name
+  #
   def css_name_selector
     @name.reduce('') do |sum, n|
       sum + "[href*='#{n.downcase}']"
@@ -187,6 +189,11 @@ class CompaniesParser
   def check_js_loaded_social_links
     @social_links.each do |k,v|
       next unless v.empty?
+
+      # Many social media links contain only part of the company's name. For
+      # example:
+      #
+      # Sole Bicycles => facebook.com/brilliantbicycles
       css4_name_selectors.each do |s|
         selenium_search_wrapper do |el_type|
           el_type = k
