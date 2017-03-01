@@ -23,8 +23,6 @@ require 'pry'
 # (a profile picture from facebook page or instagram page that corresponds to the website) ----> b.profile_image (this is an url string)
 
 
-
-
 # For now, scrapes website information based on the following root-level file:
 # companylist.csv
 class CompaniesScraper
@@ -42,12 +40,6 @@ class CompaniesScraper
     end
     @co_parser.stop_driver
   end
-
-#    pecifically (where b = Brand.new):
-#      <meta name="description" content="" /> ----> b.desc
-#    <meta property="og:title" content=""> ----> b.name
-#    <meta property="og:image" content="" /> ----> b.card_image (this is an url string)
-#    (a profile picture from facebook page or instagram page that corresponds to the website) ----> b.profile_image (this is an url string)
 end
 
 # Handles the parsing of all data both static and AJAX-loaded data
@@ -77,6 +69,14 @@ class CompaniesParser
     set_static_social_links
     ensure_data_with_js
     # create model
+    Brand.create({
+      desc: @meta_info[:description],
+      name: @meta_info[:title],
+      card_img: @meta_info[:image],
+      facebook_url: @social_links[:facebook],
+      instagram_url: @social_links[:instagram],
+      profile_img: @profile_picture
+    })
   end
 
   def start_driver
@@ -263,6 +263,7 @@ class CompaniesParser
 
     # Last ditch effort to find social media links to get profile picture
     check_social_links_without_name if all_social_links_empty?
+    p @social_links
 
     check_js_loaded_profile_pic
     p @profile_picture
