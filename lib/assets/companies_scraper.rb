@@ -90,12 +90,17 @@ class CompaniesParser
   private
 
   def cleanse_name(name)
-    remove_special_chars(remove_special_char_words(name))
+    name_arr = name_as_arr(name)
+    remove_special_chars(remove_special_char_words(name_arr))
   end
 
-  def remove_special_char_words(name)
+  def name_as_arr(name)
     return [name.downcase] unless name.include? ' '
-    name.strip.split(' ').delete_if do |n|
+    name.strip.split(' ')
+  end
+
+  def remove_special_char_words(name_arr)
+    name_arr.delete_if do |n|
       result = false
       SPECIAL_CHARACTERS.each do |c|
         if c == n
@@ -120,8 +125,8 @@ class CompaniesParser
   #
   # Ex:
   #
-  # The Bouqs => ["[href*='the']", "href*='bouqs'"]
-  # Frank & Oak => ["href*='frank'", "href*='oak'"]
+  # The Bouqs => "[href*='the'][href*='bouqs']"
+  # Frank & Oak => "[href*='frank'][href*='oak']"
   # 
   def css_name_selector
     @name.reduce('') do |sum, n|
@@ -129,18 +134,21 @@ class CompaniesParser
     end
   end
 
+  # Same as css_name_selector, but ignores case (only works with CSS4 and above)
   def css4_name_selector
     @name.reduce('') do |sum, n|
       sum + "[href*='#{n.downcase}' i]"
     end
   end
 
+  # Returns css4_name_selectors as an array
   def css4_name_selectors
     @name.map do |n|
       "[href*='#{n.downcase}' i]"
     end
   end
 
+  # Sets static meta information. Static implies Nokogiri
   def set_static_meta_info
     @meta_info.each do |k, _|
       data = @html.css(self.class.const_get("META_#{k.to_s.upcase}"))[0]
@@ -148,6 +156,7 @@ class CompaniesParser
     end
   end
 
+  # Sets static social links information. Static implies Nokogiri
   def set_static_social_links
     @social_links.each do |k, _|
       data = @html.css(self.class.const_get("#{k.to_s.upcase}_SELECTOR") + css_name_selector)[0]
@@ -155,6 +164,8 @@ class CompaniesParser
     end
   end
 
+  # So far, only one of these.
+  # NOTE: Could make more robust in the future
   def ensure_valid_link(link)
     if link.start_with? '//'
       link = 'https:' + link
@@ -219,6 +230,7 @@ class CompaniesParser
     end
   end
 
+  # Request handler for Selenium-specific errors
   def selenium_search_wrapper
     element_type = ''
     begin
