@@ -35,10 +35,7 @@ class CompaniesScraper
   end
 
   def scrape
-    cnt = 0
     CSV.foreach(@source, headers: true) do |row|
-      cnt += 1
-      next if cnt <= 3
       html = @request_handler.page_info(row['URL'])
       @co_parser.parse(html, row['URL'], row['Anchor']) if html
     end
@@ -56,9 +53,9 @@ class CompaniesParser
   META_DESCRIPTION = "meta[name='description']".freeze
   META_TITLE = "meta[property='og:title']".freeze
   META_IMAGE = "meta[property='og:image']".freeze
-  FACEBOOK_SELECTOR = 'a[href*="//www.facebook"]'.freeze
-  INSTAGRAM_SELECTOR = 'a[href*="//www.instagram"]'.freeze
-  SPECIAL_CHARACTERS = ['&']
+  FACEBOOK_SELECTOR = 'a[href*="facebook.com"]'.freeze
+  INSTAGRAM_SELECTOR = 'a[href*="instagram.com"]'.freeze
+  SPECIAL_CHARACTERS = ['&', '?', '.']
 
   def parse(html, url, name)
     @html = html
@@ -76,13 +73,20 @@ class CompaniesParser
     }
     @profile_picture = ''
     set_static_social_links
+    @driver = Selenium::WebDriver.for :chrome, switches: %w[--ignore-certificate-errors --disable-translate], driver_path: '/home/durendal/workspace/chromedriver'
     ensure_data_with_js
+    @driver.quit
     # create model
   end
 
   private
 
   def cleanse_name(name)
+    remove_special_chars(remove_special_char_words(name))
+  end
+
+  def remove_special_char_words(name)
+    return [name.downcase] unless name.include? ' '
     name.strip.split(' ').delete_if do |n|
       result = false
       SPECIAL_CHARACTERS.each do |c|
@@ -90,6 +94,15 @@ class CompaniesParser
           result = true
           break
         end
+      end
+      result
+    end
+  end
+
+  def remove_special_chars(name_arr)
+    name_arr.each do |n|
+      SPECIAL_CHARACTERS.each do |c|
+        n.gsub! /#{Regexp.escape(c)}/, ''
       end
     end
   end
@@ -108,6 +121,18 @@ class CompaniesParser
     end
   end
 
+  def css4_name_selector
+    @name.reduce('') do |sum, n|
+      sum + "[href*='#{n.downcase}' i]"
+    end
+  end
+
+  def css4_name_selectors
+    @name.map do |n|
+      "[href*='#{n.downcase}' i]"
+    end
+  end
+
   def set_static_meta_info
     @meta_info.each do |k, _|
       data = @html.css(self.class.const_get("META_#{k.to_s.upcase}"))[0]
@@ -118,8 +143,15 @@ class CompaniesParser
   def set_static_social_links
     @social_links.each do |k, _|
       data = @html.css(self.class.const_get("#{k.to_s.upcase}_SELECTOR") + css_name_selector)[0]
-      @social_links[k] = data['href'] if data
+      @social_links[k] = ensure_valid_link(data['href']) if data
     end
+  end
+
+  def ensure_valid_link(link)
+    if link.start_with? '//'
+      link = 'https:' + link
+    end
+    link
   end
 
   def check_js_loaded_meta_info
@@ -129,22 +161,37 @@ class CompaniesParser
         el = @driver.find_element(:css, self.class.const_get("META_#{k.to_s.upcase}"))
         @meta_info[k] = el['content']
       rescue Selenium::WebDriver::Error::NoSuchElementError
-        puts "No #{k} element found"
       end
     end
   end
 
   def check_js_loaded_social_links
-    if @social_links.values.keep_if { |s| !s.empty? }.empty?
-      @social_links.each do |k,_|
-        begin
-          el = @driver.find_element(:css, self.class.const_get("#{k.to_s.upcase}_SELECTOR") + css_name_selector)
+    @social_links.each do |k,v|
+      next unless v.empty?
+      css4_name_selectors.each do |s|
+        selenium_search_wrapper do |el_type|
+          el_type = k
+          el = @driver.find_element(:css, self.class.const_get("#{k.to_s.upcase}_SELECTOR") + s)
           @social_links[k] = el['href']
-        rescue Selenium::WebDriver::Error::NoSuchElementError
-          puts "No #{k} element found"
         end
       end
     end
+  end
+
+  def check_social_links_without_name
+    @social_links.each do |k,v|
+      next unless v.empty?
+      selenium_search_wrapper do |el_type|
+        el_type = k
+        el = @driver.find_element(:css, self.class.const_get("#{k.to_s.upcase}_SELECTOR"))
+        @social_links[k] = el['href']
+      end
+    end
+  end
+
+  def all_social_links_empty?
+    @social_links.each { |_,v| return false unless v.empty? }
+    true
   end
 
   def check_js_loaded_profile_pic
@@ -152,25 +199,35 @@ class CompaniesParser
       break unless @profile_picture.empty?
       next if v.empty?
       @driver.navigate.to v
-      begin
+      selenium_search_wrapper do |el_type|
+        el_type = k
         if k == :facebook
           el = @driver.find_element(:css, "a[aria-label='Profile picture'] img")
         else
-          binding.pry
           el = @driver.find_element(:css, "header img[class='_8gpiy _r43r5']")
         end
-      rescue Selenium::WebDriver::Error::NoSuchElementError
-        puts "No #{k} element found fo social link"
+        @profile_picture = el['src'] if el
       end
-      @profile_picture = el['src'] if el
+    end
+  end
+
+  def selenium_search_wrapper
+    element_type = ''
+    begin
+      yield(element_type) if block_given?
+    rescue Selenium::WebDriver::Error::NoSuchElementError, Selenium::WebDriver::Error::TimeOutError => e
+      # Handle too much JS loading
+      @driver.execute_script('window.stop();') if e.message.include? 'timeout'
     end
   end
 
   def ensure_data_with_js
     # check with js/selenium
-    @driver = Selenium::WebDriver.for :chrome, switches: %w[--ignore-certificate-errors --disable-translate], driver_path: '/home/durendal/workspace/chromedriver'
+    @driver.manage.timeouts.page_load = 60
 
-    @driver.navigate.to @url
+    selenium_search_wrapper do
+      @driver.navigate.to @url
+    end
 
     check_js_loaded_meta_info
     p @meta_info 
@@ -178,10 +235,11 @@ class CompaniesParser
     check_js_loaded_social_links
     p @social_links
 
+    # Last ditch effort to find social media links to get profile picture
+    check_social_links_without_name if all_social_links_empty?
+
     check_js_loaded_profile_pic
     p @profile_picture
-
-    @driver.quit
   end
 end
 
@@ -196,7 +254,6 @@ class RequestHandler
     tries = 3
 
     begin
-      puts uri
       uri.open(redirect: false)
     rescue OpenURI::HTTPRedirect, OpenURI::HTTPError => e
       if e.class == OpenURI::HTTPRedirect
@@ -204,7 +261,8 @@ class RequestHandler
         retry if (tries -= 1) > 0
         raise
       elsif e.class == OpenURI::HTTPError
-        puts "404 on #{url}"
+        # Handles 404s
+        # TODO: Possibly delete or make not of this?
         return nil
       end
     end
