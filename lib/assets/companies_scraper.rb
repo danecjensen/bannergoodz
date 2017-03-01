@@ -42,6 +42,7 @@ class CompaniesScraper
   end
 end
 
+# TODO: Split parsing and selenium into two different classes
 # Handles the parsing of all data both static and AJAX-loaded data
 class CompaniesParser
   META_DESCRIPTION = "meta[name='description']".freeze
@@ -171,6 +172,38 @@ class CompaniesParser
     link
   end
 
+  def ensure_data_with_js
+    @driver.manage.timeouts.page_load = 60
+
+    selenium_search_wrapper do
+      @driver.navigate.to @url
+    end
+
+    check_js_loaded_meta_info
+    p @meta_info 
+
+    check_js_loaded_social_links
+    p @social_links
+
+    # Last ditch effort to find social media links to get profile picture
+    check_social_links_without_name if all_social_links_empty?
+    p @social_links
+
+    check_js_loaded_profile_pic
+    p @profile_picture
+  end
+
+  # Request handler for Selenium-specific errors
+  def selenium_search_wrapper
+    element_type = ''
+    begin
+      yield(element_type) if block_given?
+    rescue Selenium::WebDriver::Error::NoSuchElementError, Selenium::WebDriver::Error::TimeOutError => e
+      # Handle too much JS loading
+      @driver.execute_script('window.stop();') if e.message.include? 'timeout'
+    end
+  end
+
   def check_js_loaded_meta_info
     @meta_info.each do |k,v|
       next unless v.empty?
@@ -231,38 +264,6 @@ class CompaniesParser
         @profile_picture = el['src'] if el
       end
     end
-  end
-
-  # Request handler for Selenium-specific errors
-  def selenium_search_wrapper
-    element_type = ''
-    begin
-      yield(element_type) if block_given?
-    rescue Selenium::WebDriver::Error::NoSuchElementError, Selenium::WebDriver::Error::TimeOutError => e
-      # Handle too much JS loading
-      @driver.execute_script('window.stop();') if e.message.include? 'timeout'
-    end
-  end
-
-  def ensure_data_with_js
-    @driver.manage.timeouts.page_load = 60
-
-    selenium_search_wrapper do
-      @driver.navigate.to @url
-    end
-
-    check_js_loaded_meta_info
-    p @meta_info 
-
-    check_js_loaded_social_links
-    p @social_links
-
-    # Last ditch effort to find social media links to get profile picture
-    check_social_links_without_name if all_social_links_empty?
-    p @social_links
-
-    check_js_loaded_profile_pic
-    p @profile_picture
   end
 end
 
